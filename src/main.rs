@@ -56,13 +56,28 @@ fn get_cursor() -> HCURSOR {
     unsafe { LoadCursorFromFileW(wide.as_ptr()) }
 }
 
+/// Set all system cursors to a specific cursor.
+///
+/// See: https://stackoverflow.com/a/55098397/451726
 #[cfg(windows)]
 fn set_system_cursor(cursor: HCURSOR) {
     use winapi::um::winuser::SetSystemCursor;
 
     let cursor_ids: Vec<DWORD> = vec![
-        32650, 32512, 32515, 32649, 32651, 32513, 32648, 32646, 32643, 32645, 32642, 32644, 32516,
-        32514,
+        32650, // OCR_APPSTARTING
+        32512, // OCR_NORMAL
+        32515, // OCR_CROSS
+        32649, // OCR_HAND
+        32651, // OCR_HELP
+        32513, // OCR_IBEAM
+        32648, // OCR_NO
+        32646, // OCR_SIZEALL
+        32643, // OCR_SIZENESW
+        32645, // OCR_SIZENS
+        32642, // OCR_SIZENWSE
+        32644, // OCR_SIZEWE
+        32516, // OCR_UP
+        32514, // OCR_WAIT
     ];
 
     for cursor_id in cursor_ids {
@@ -71,6 +86,9 @@ fn set_system_cursor(cursor: HCURSOR) {
     }
 }
 
+/// Restore original system cursors
+///
+/// See: https://stackoverflow.com/a/55098397/451726
 #[cfg(windows)]
 fn restore_original_cursors() {
     use winapi::um::winuser::SystemParametersInfoW;

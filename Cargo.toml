@@ -1,0 +1,10 @@
+[package]
+name = "windows-cursor-changer"
+version = "0.1.0"
+authors = ["Marcus Ball <marcus@marcusball.me>"]
+edition = "2018"
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winuser", "libloaderapi"] }

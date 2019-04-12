@@ -156,9 +156,9 @@ fn main() {
 
     let thread_exit = Arc::clone(&exit);
     let child = thread::spawn(move || {
-        //let cursor = get_cursor();
+        let cursor = get_cursor();
 
-        // set_system_cursor(cursor);
+        set_system_cursor(cursor);
 
         let mut should_exit = false;
 
@@ -175,6 +175,8 @@ fn main() {
 
         println!("Exiting gracefully...");
         // some work here
+
+        restore_original_cursors();
     });
 
     // Create a window

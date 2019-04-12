@@ -1,5 +1,7 @@
 // Let's put this so that it won't open console
-#![windows_subsystem = "windows"]
+// #![windows_subsystem = "windows"]
+
+// Code mostly copied from: https://gist.github.com/TheSatoshiChiba/6dd94713669efd1636efe4ee026b67af
 
 #[cfg(windows)]
 extern crate winapi;
@@ -10,7 +12,7 @@ use std::io::Error;
 use std::iter::once;
 use std::mem;
 use std::os::windows::ffi::OsStrExt;
-use std::ptr::null_mut;
+use std::ptr::{null_mut, null};
 
 
 use self::winapi::shared::windef::HWND;
@@ -63,6 +65,7 @@ fn get_cursor() -> HCURSOR {
 fn set_system_cursor(cursor: HCURSOR) {
     use winapi::um::winuser::SetSystemCursor;
 
+    // See: https://docs.microsoft.com/en-us/windows/desktop/api/winuser/nf-winuser-setsystemcursor
     let cursor_ids: Vec<DWORD> = vec![
         32650, // OCR_APPSTARTING
         32512, // OCR_NORMAL
@@ -173,8 +176,6 @@ fn handle_message(window: &mut Window) -> bool {
 
         // Get message from message queue with GetMessageW
         if GetMessageW(&mut message as *mut MSG, window.handle, 0, 0) > 0 {
-            println!("{}", message.message);
-
             TranslateMessage(&message as *const MSG); // Translate message into something meaningful with TranslateMessage
             DispatchMessageW(&message as *const MSG); // Dispatch message with DispatchMessageW
 
@@ -184,14 +185,65 @@ fn handle_message(window: &mut Window) -> bool {
         }
     }
 }
+
+#[cfg(windows)]
+fn get_cursor_pos() {
+    use winapi::shared::minwindef::{HINSTANCE, MAX_PATH};
+    use winapi::shared::ntdef::HANDLE;
+    use winapi::shared::windef::{POINT};
+
+    use winapi::um::winnt::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+    use winapi::um::processthreadsapi::OpenProcess;
+    use winapi::um::handleapi::CloseHandle;
+    use winapi::um::psapi::GetModuleFileNameExW;
+    use winapi::um::winuser::{GetCursorPos, GetWindowThreadProcessId, WindowFromPoint};
+
+    unsafe {
+        let mut point: POINT = mem::uninitialized();
+
+        if GetCursorPos(&mut point) == 0 {
+            return;
+        }
+
+        print!("{} {} ", point.x, point.y);
+
+        let window = WindowFromPoint(point);
+
+        let mut process_id: DWORD = mem::uninitialized();
+
+        GetWindowThreadProcessId(window, &mut process_id);
+
+        print!("Proc ID: {}", process_id);
+
+        let hProc: HANDLE = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, process_id);
+
+        let mut vec = Vec::with_capacity(MAX_PATH);
+
+        let length = GetModuleFileNameExW(hProc, null_mut(), vec.as_mut_ptr(), MAX_PATH as u32);
+
+        vec.set_len(length as usize);
+
+        CloseHandle(hProc);
+
+        let name = String::from_utf16(&vec).unwrap();
+
+        println!(" {}", name);
+    }
+}
+
 #[cfg(windows)]
 fn main() {
+    println!("running");
     let mut window = create_window("my_window", "Portfolio manager pro").unwrap();
 
+    println!("before loop");
     loop {
+        get_cursor_pos();
+
         if !handle_message(&mut window) {
 
             restore_original_cursors();
+
             break;
         }
     }

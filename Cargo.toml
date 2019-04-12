@@ -5,6 +5,7 @@ authors = ["Marcus Ball <marcus@marcusball.me>"]
 edition = "2018"
 
 [dependencies]
+failure = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winuser", "libloaderapi", "processthreadsapi", "handleapi", "psapi"] }

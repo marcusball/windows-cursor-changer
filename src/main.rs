@@ -12,7 +12,8 @@ use std::io::Error;
 use std::iter::once;
 use std::mem;
 use std::os::windows::ffi::OsStrExt;
-use std::ptr::{null_mut, null};
+use std::ptr::{null, null_mut};
+use std::thread;
 
 
 use self::winapi::shared::windef::HWND;
@@ -190,11 +191,13 @@ fn handle_message(window: &mut Window) -> bool {
 fn get_cursor_pos() {
     use winapi::shared::minwindef::{HINSTANCE, MAX_PATH};
     use winapi::shared::ntdef::HANDLE;
-    use winapi::shared::windef::{POINT};
-
+    use winapi::shared::windef::POINT;
+    #[rustfmt::skip]
     use winapi::um::winnt::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+    #[rustfmt::skip]
     use winapi::um::processthreadsapi::OpenProcess;
     use winapi::um::handleapi::CloseHandle;
+    #[rustfmt::skip]
     use winapi::um::psapi::GetModuleFileNameExW;
     use winapi::um::winuser::{GetCursorPos, GetWindowThreadProcessId, WindowFromPoint};
 
@@ -227,24 +230,34 @@ fn get_cursor_pos() {
 
         let name = String::from_utf16(&vec).unwrap();
 
-        println!(" {}", name);
+        print!(" {}", name);
     }
 }
 
 #[cfg(windows)]
 fn main() {
     println!("running");
-    let mut window = create_window("my_window", "Portfolio manager pro").unwrap();
+    let mut window = create_window("my_window", "Window Cursor Changer").unwrap();
 
     println!("before loop");
+
+    let child = thread::spawn(move || {
+        loop {
+            print!("reading... ");
+            get_cursor_pos();
+            println!("");
+
+        }
+        // some work here
+    });
+
     loop {
-        get_cursor_pos();
-
         if !handle_message(&mut window) {
-
             restore_original_cursors();
-
             break;
         }
     }
+
+    // some work here
+    let res = child.join();
 }

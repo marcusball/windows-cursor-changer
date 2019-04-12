@@ -15,8 +15,9 @@ use std::iter::once;
 use std::mem;
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
-use std::thread;
 
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use winapi::shared::minwindef::{DWORD, UINT};
 use winapi::shared::windef::HCURSOR;
@@ -151,27 +152,44 @@ fn get_cursor_pos() -> Result<Option<String>, Error> {
 
 #[cfg(windows)]
 fn main() {
+    let exit = Arc::new(Mutex::new(false));
 
+    let thread_exit = Arc::clone(&exit);
     let child = thread::spawn(move || {
         //let cursor = get_cursor();
 
         // set_system_cursor(cursor);
 
-        loop {
+        let mut should_exit = false;
+
+        while !should_exit {
             match get_cursor_pos() {
                 Ok(Some(name)) => println!("{}", name),
                 Ok(None) => {}
                 Err(e) => println!("ERROR: {}", e),
             }
+
+            // read the mutex to see if the thread should quit
+            should_exit = *thread_exit.lock().unwrap();
         }
+
+        println!("Exiting gracefully...");
         // some work here
     });
 
     // Create a window
     window::create_window_and_block();
 
+    println!("Notifying thread to exit");
+
+    {
+        let mut signal_exit = exit.lock().unwrap();
+        *signal_exit = true;
+        // Drop the lock so that the thread can read the signal
+    }
+
     // some work here
     let res = child.join();
 
-    restore_original_cursors();
+    //restore_original_cursors();
 }

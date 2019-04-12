@@ -95,6 +95,8 @@ fn create_window(name: &str, title: &str) -> Result<Window, IoError> {
 // Create message handling function with which to link to hook window to Windows messaging system
 // More info: https://msdn.microsoft.com/en-us/library/windows/desktop/ms644927(v=vs.85).aspx
 fn handle_message(window: &mut Window) -> bool {
+    use winapi::um::winuser::WM_CLOSE;
+
     unsafe {
         let mut message: MSG = mem::uninitialized();
 
@@ -103,7 +105,12 @@ fn handle_message(window: &mut Window) -> bool {
             TranslateMessage(&message as *const MSG); // Translate message into something meaningful with TranslateMessage
             DispatchMessageW(&message as *const MSG); // Dispatch message with DispatchMessageW
 
-            true
+            match message.message {
+                // If we receive the close message, return false to break render loop
+                WM_CLOSE => false,
+                // Not handling any other messages
+                _ => true,
+            }
         } else {
             false
         }

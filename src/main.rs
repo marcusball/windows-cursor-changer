@@ -158,13 +158,27 @@ fn main() {
     let child = thread::spawn(move || {
         let cursor = get_cursor();
 
-        set_system_cursor(cursor);
+        let mut is_custom_cursor = false;
 
         let mut should_exit = false;
 
         while !should_exit {
             match get_cursor_pos() {
-                Ok(Some(name)) => println!("{}", name),
+                Ok(Some(name)) => {
+                    if name.ends_with("powershell.exe") {
+                        if !is_custom_cursor {
+                            println!("setting cursor");
+                            set_system_cursor(cursor);
+                            is_custom_cursor = true;
+                        }
+                    } else {
+                        if is_custom_cursor {
+                            println!("restoring cursor");
+                            restore_original_cursors();
+                            is_custom_cursor = false;
+                        }
+                    }
+                }
                 Ok(None) => {}
                 Err(e) => println!("ERROR: {}", e),
             }

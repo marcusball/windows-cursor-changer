@@ -1,10 +1,17 @@
 // Let's put this so that it won't open console
 // #![windows_subsystem = "windows"]
 
+extern crate serde;
+extern crate toml;
 #[cfg(windows)]
 extern crate winapi;
+#[macro_use]
+extern crate serde_derive;
+
+
 // https://docs.rs/winapi/*/x86_64-pc-windows-msvc/winapi/um/libloaderapi/index.html?search=winuser
 
+mod config;
 mod error;
 mod window;
 
@@ -32,13 +39,25 @@ fn win32_string(value: &str) -> Vec<u16> {
 
 #[cfg(windows)]
 fn get_cursor() -> HCURSOR {
-    use winapi::um::winuser::LoadCursorFromFileW;
+    use winapi::um::winuser::{
+        LoadCursorFromFileW, LoadImageW, IMAGE_CURSOR, LR_DEFAULTCOLOR, LR_LOADFROMFILE,
+    };
 
-    let path = "D:\\Users\\Marcus\\Source\\SmallProjects\\windows-cursor-changer\\sissy.ani";
+    let path = "D:\\Users\\Marcus\\Source\\SmallProjects\\windows-cursor-changer\\big.cur";
 
     let wide: Vec<u16> = win32_string(&path);
 
-    unsafe { LoadCursorFromFileW(wide.as_ptr()) }
+    // unsafe { LoadCursorFromFileW(wide.as_ptr()) }
+    unsafe {
+        LoadImageW(
+            null_mut(),
+            wide.as_ptr(),
+            IMAGE_CURSOR,
+            0,
+            0,
+            LR_DEFAULTCOLOR | LR_LOADFROMFILE,
+        ) as HCURSOR
+    }
 }
 
 /// Set all system cursors to a specific cursor.
@@ -152,6 +171,11 @@ fn get_cursor_pos() -> Result<Option<String>, Error> {
 
 #[cfg(windows)]
 fn main() {
+    let config = config::Config::from_file("cursor.toml").unwrap();
+
+    println!("{:?}", config);
+
+
     let exit = Arc::new(Mutex::new(false));
 
     let thread_exit = Arc::clone(&exit);

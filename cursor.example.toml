@@ -1,0 +1,11 @@
+[[cursor]]
+name = "dog"
+path = "sissi.ani"
+
+[[cursor]]
+name = "big"
+path = "big.cur"
+
+[[application]]
+cursor = "cat"
+path = "powershell.exe"

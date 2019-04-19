@@ -39,9 +39,14 @@ type Result<T> = std::result::Result<T, error::Error>;
 #[derive(Debug)]
 pub struct CursorHandle(HCURSOR);
 
+type CursorId = u32;
+
 /// Cursor struct
 #[derive(Debug)]
 pub struct Cursor {
+    /// A unique integer identifer for this Cursor
+    id: CursorId,
+
     /// Unique identifer for this Cursor
     name: String,
 
@@ -54,8 +59,9 @@ pub struct Cursor {
 
 impl Cursor {
     /// Create a cursor and load it to acquire a usable handle to it.
-    pub fn new(name: String, path: String) -> Cursor {
+    pub fn new(id: CursorId, name: String, path: String) -> Cursor {
         Cursor {
+            id: id,
             name: name,
             handle: get_cursor(&path),
             path: path,
@@ -69,28 +75,46 @@ impl Cursor {
 }
 
 #[derive(Debug)]
+pub struct Application {
+    /// The ID of the Cursor to use when the mouse is over this Application.
+    cursor_id: CursorId, 
+
+    /// The path (or partial path) that will be used to identify this Application. 
+    /// Comparison will be done by checking if the full path of the executable 
+    /// under the cursor `ends_with` this `path`, so this may be a full absolute path,
+    /// or just the exe name or partial path. 
+    path: String,
+}
+
+impl Application {
+    pub fn new(cursor: CursorId, path: String) -> Self {
+        Application {
+            cursor_id: cursor, 
+            path: path
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct CursorChanger {
+    /// Lookup map to associate the cursor `name` with a unique numerical CursorId
+    cursor_ids: HashMap<String, CursorId>,
+
     /// Map that associates a cursor's unique `name` with the cursor itself.
-    cursors: HashMap<String, Cursor>,
+    cursors: HashMap<CursorId, Cursor>,
 
     /// Monitored applications
-    applications: Vec<config::Application>,
+    applications: Vec<Application>,
 
-    /// Run-time state: Is a custom cursor active (true) or is the Windows system cursor active (false)?
-    is_custom_cursor: bool,
+    /// Run-time state: Which custom cursor is currently active, or is it the Windows system cursor (`None`).
+    active_cursor: Option<CursorId>,
 }
 
 
 impl CursorChanger {
     fn from_config(config: config::Config) -> Result<CursorChanger> {
         let mut changer = CursorChanger::new();
-        changer.add_cursors(
-            config
-                .cursor
-                .into_iter()
-                .map(|c| Cursor::new(c.name, c.path))
-                .collect(),
-        )?;
+        changer.add_cursors(config.cursor)?;
         changer.add_applications(config.application)?;
 
         Ok(changer)
@@ -98,18 +122,31 @@ impl CursorChanger {
 
     fn new() -> CursorChanger {
         CursorChanger {
+            cursor_ids: HashMap::new(),
             cursors: HashMap::new(),
             applications: Vec::new(),
-            is_custom_cursor: false,
+            active_cursor: None
         }
     }
 
+    pub fn is_custom_cursor_active(&self) -> bool {
+        self.active_cursor.is_some()
+    }
+
     /// Insert Cursors into the configuration `cursors` map.
-    fn add_cursors(&mut self, cursors: Vec<Cursor>) -> Result<()> {
-        for cursor in cursors.into_iter() {
+    fn add_cursors(&mut self, cursors: Vec<config::Cursor>) -> Result<()> {
+        // Find the max existing ID, or default to zero if there are no existing IDs.
+        let max_id = self.cursor_ids.values().max().unwrap_or(&0);
+
+        // This will keep track of the next ID to assign to each new cursor. 
+        let mut next_id = max_id + 1;
+
+        for config_cursor in cursors.into_iter() {
+            let cursor = Cursor::new(next_id, config_cursor.name, config_cursor.path);
+
             // Check to make sure there isn't already a cursor using this unique `name`.
-            if self.cursors.contains_key(&cursor.name) {
-                return Err(error::Error::DuplicateCursorId {
+            if self.cursor_ids.contains_key(&cursor.name) {
+                return Err(error::Error::DuplicateCursorName {
                     name: cursor.name.clone(),
                 });
             }
@@ -122,8 +159,16 @@ impl CursorChanger {
                 });
             }
 
+            let _existing = self.cursor_ids.insert(cursor.name.clone(), cursor.id); 
+
+            // insert returns the value that was replaced if the key already exists
+            assert_eq!(None, _existing);
+
             // Insert it into the map for easy lookup by `name`.
-            self.cursors.insert(cursor.name.clone(), cursor);
+            self.cursors.insert(cursor.id, cursor);
+
+            // Increment the new Cursor ID. 
+            next_id += 1;
         }
 
         Ok(())
@@ -133,12 +178,20 @@ impl CursorChanger {
     /// This will check to make sure that there exists a Cursor identified
     /// by the Application's `cursor` name.
     fn add_applications(&mut self, applications: Vec<config::Application>) -> Result<()> {
-        for application in applications.into_iter() {
-            if !self.cursors.contains_key(&application.cursor) {
-                return Err(error::Error::MissingCursorIdError {
-                    name: application.cursor.clone(),
-                });
-            }
+        for config_application in applications.into_iter() {
+            // Try to find the ID of the cursor, given the cursor's name. 
+            let cursor_id = match self.cursor_ids.get(&config_application.cursor) {
+                // If we found it, use that ID. 
+                Some(id) => id,
+                // If the name did not return an ID, quit with an error. 
+                None => {
+                    return Err(error::Error::MissingCursorNameError {
+                        name: config_application.cursor.clone(),
+                    });
+                }
+            };
+
+            let application = Application::new(*cursor_id, config_application.path);
 
             self.applications.push(application);
         }
@@ -153,16 +206,16 @@ impl CursorChanger {
         match get_cursor_pos() {
             Ok(Some(name)) => {
                 if name.ends_with("powershell.exe") {
-                    if !self.is_custom_cursor {
+                    if !self.is_custom_cursor_active() {
                         println!("setting cursor");
                         set_system_cursor(&cursor.handle);
-                        self.is_custom_cursor = true;
+                        self.active_cursor = Some(cursor.id);
                     }
                 } else {
-                    if self.is_custom_cursor {
+                    if self.is_custom_cursor_active() {
                         println!("restoring cursor");
                         restore_original_cursors();
-                        self.is_custom_cursor = false;
+                        self.active_cursor = None;
                     }
                 }
             }

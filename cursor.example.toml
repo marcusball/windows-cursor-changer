@@ -7,5 +7,5 @@ name = "big"
 path = "big.cur"
 
 [[application]]
-cursor = "cat"
+cursor = "dog"
 path = "powershell.exe"

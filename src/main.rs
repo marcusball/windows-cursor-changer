@@ -29,10 +29,119 @@ use std::thread;
 use winapi::shared::minwindef::{DWORD, UINT};
 use winapi::shared::windef::HCURSOR;
 
+use std::collections::HashMap;
+use std::io::prelude::*;
+use std::path::Path;
+
+type Result<T> = std::result::Result<T, error::Error>;
 
 /// Wrapper around the HCURSOR winapi type
-pub struct Cursor(HCURSOR);
+#[derive(Debug)]
+pub struct CursorHandle(HCURSOR);
 
+/// Cursor struct
+#[derive(Debug)]
+pub struct Cursor {
+    /// Unique identifer for this Cursor
+    name: String,
+
+    /// Path to this Cursor's .cur or .ani file.
+    path: String,
+
+    /// Handle to the Cursor loaded by Windows.
+    handle: CursorHandle,
+}
+
+impl Cursor {
+    /// Create a cursor and load it to acquire a usable handle to it.
+    pub fn new(name: String, path: String) -> Cursor {
+        Cursor {
+            name: name,
+            handle: get_cursor(&path),
+            path: path,
+        }
+    }
+
+    /// Get the Path to this Cursor's image file.
+    pub fn path(&self) -> &Path {
+        Path::new(&self.path)
+    }
+}
+
+#[derive(Debug)]
+pub struct CursorChanger {
+    /// Map that associates a cursor's unique `name` with the cursor itself.
+    cursors: HashMap<String, Cursor>,
+
+    /// Monitored applications
+    applications: Vec<config::Application>,
+}
+
+
+impl CursorChanger {
+    fn from_config(config: config::Config) -> Result<CursorChanger> {
+        let mut changer = CursorChanger::new();
+        changer.add_cursors(
+            config
+                .cursor
+                .into_iter()
+                .map(|c| Cursor::new(c.name, c.path))
+                .collect(),
+        )?;
+        changer.add_applications(config.application)?;
+
+        Ok(changer)
+    }
+
+    fn new() -> CursorChanger {
+        CursorChanger {
+            cursors: HashMap::new(),
+            applications: Vec::new(),
+        }
+    }
+
+    /// Insert Cursors into the configuration `cursors` map.
+    fn add_cursors(&mut self, cursors: Vec<Cursor>) -> Result<()> {
+        for cursor in cursors.into_iter() {
+            // Check to make sure there isn't already a cursor using this unique `name`.
+            if self.cursors.contains_key(&cursor.name) {
+                return Err(error::Error::DuplicateCursorId {
+                    name: cursor.name.clone(),
+                });
+            }
+
+            // Check to make sure the file specified by the `path` exists.
+            if !cursor.path().exists() {
+                return Err(error::Error::MissingCursorFileError {
+                    name: cursor.name.clone(),
+                    path: cursor.path.clone(),
+                });
+            }
+
+            // Insert it into the map for easy lookup by `name`.
+            self.cursors.insert(cursor.name.clone(), cursor);
+        }
+
+        Ok(())
+    }
+
+    /// Insert tracked applications into the Config `applications` map.
+    /// This will check to make sure that there exists a Cursor identified
+    /// by the Application's `cursor` name.
+    fn add_applications(&mut self, applications: Vec<config::Application>) -> Result<()> {
+        for application in applications.into_iter() {
+            if !self.cursors.contains_key(&application.cursor) {
+                return Err(error::Error::MissingCursorIdError {
+                    name: application.cursor.clone(),
+                });
+            }
+
+            self.applications.push(application);
+        }
+
+        Ok(())
+    }
+}
 
 // ----------------------------------------------------
 
@@ -43,14 +152,12 @@ fn win32_string(value: &str) -> Vec<u16> {
 }
 
 #[cfg(windows)]
-fn get_cursor() -> Cursor {
+fn get_cursor(path: &str) -> CursorHandle {
     use winapi::um::winuser::{
         LoadCursorFromFileW, LoadImageW, IMAGE_CURSOR, LR_DEFAULTCOLOR, LR_LOADFROMFILE,
     };
 
-    let path = "D:\\Users\\Marcus\\Source\\SmallProjects\\windows-cursor-changer\\big.cur";
-
-    let wide: Vec<u16> = win32_string(&path);
+    let wide: Vec<u16> = win32_string(path);
 
     // unsafe { LoadCursorFromFileW(wide.as_ptr()) }
     let c = unsafe {
@@ -64,14 +171,14 @@ fn get_cursor() -> Cursor {
         ) as HCURSOR
     };
 
-    Cursor(c)
+    CursorHandle(c)
 }
 
 /// Set all system cursors to a specific cursor.
 ///
 /// See: https://stackoverflow.com/a/55098397/451726
 #[cfg(windows)]
-fn set_system_cursor(cursor: &Cursor) {
+fn set_system_cursor(cursor: &CursorHandle) {
     use winapi::um::winuser::SetSystemCursor;
 
     // See: https://docs.microsoft.com/en-us/windows/desktop/api/winuser/nf-winuser-setsystemcursor
@@ -113,17 +220,17 @@ fn restore_original_cursors() {
 /// Copy a cursor
 /// See: https://docs.microsoft.com/en-us/windows/desktop/api/winuser/nf-winuser-copycursor
 #[cfg(windows)]
-fn copy_cursor(cursor: &Cursor) -> Cursor {
+fn copy_cursor(cursor: &CursorHandle) -> CursorHandle {
     use winapi::shared::windef::HICON;
     use winapi::um::winuser::CopyIcon;
 
     let copied = unsafe { CopyIcon(cursor.0 as HICON) };
 
-    Cursor(copied)
+    CursorHandle(copied)
 }
 
 #[cfg(windows)]
-fn get_cursor_pos() -> Result<Option<String>, Error> {
+fn get_cursor_pos() -> Result<Option<String>> {
     use winapi::shared::minwindef::MAX_PATH;
     use winapi::shared::ntdef::HANDLE;
     use winapi::shared::windef::POINT;
@@ -182,14 +289,17 @@ fn get_cursor_pos() -> Result<Option<String>, Error> {
 fn main() {
     let config = config::Config::from_file("cursor.toml").unwrap();
 
-    println!("{:?}", config);
+    let cursor_changer = CursorChanger::from_config(config).unwrap();
+
+    println!("{:?}", cursor_changer);
 
 
     let exit = Arc::new(Mutex::new(false));
 
     let thread_exit = Arc::clone(&exit);
     let child = thread::spawn(move || {
-        let cursor = get_cursor();
+        let cursor =
+            get_cursor("D:\\Users\\Marcus\\Source\\SmallProjects\\windows-cursor-changer\\big.cur");
 
         let mut is_custom_cursor = false;
 

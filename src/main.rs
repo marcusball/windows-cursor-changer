@@ -75,6 +75,9 @@ pub struct CursorChanger {
 
     /// Monitored applications
     applications: Vec<config::Application>,
+
+    /// Run-time state: Is a custom cursor active (true) or is the Windows system cursor active (false)?
+    is_custom_cursor: bool,
 }
 
 
@@ -97,6 +100,7 @@ impl CursorChanger {
         CursorChanger {
             cursors: HashMap::new(),
             applications: Vec::new(),
+            is_custom_cursor: false,
         }
     }
 
@@ -140,6 +144,31 @@ impl CursorChanger {
         }
 
         Ok(())
+    }
+
+    pub fn tick(&mut self) {
+        // Temp: just always use the first cursor
+        let cursor = self.cursors.iter().nth(0).unwrap().1;
+
+        match get_cursor_pos() {
+            Ok(Some(name)) => {
+                if name.ends_with("powershell.exe") {
+                    if !self.is_custom_cursor {
+                        println!("setting cursor");
+                        set_system_cursor(&cursor.handle);
+                        self.is_custom_cursor = true;
+                    }
+                } else {
+                    if self.is_custom_cursor {
+                        println!("restoring cursor");
+                        restore_original_cursors();
+                        self.is_custom_cursor = false;
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(e) => println!("ERROR: {}", e),
+        }
     }
 }
 
@@ -289,42 +318,18 @@ fn get_cursor_pos() -> Result<Option<String>> {
 fn main() {
     let config = config::Config::from_file("cursor.toml").unwrap();
 
-    let cursor_changer = CursorChanger::from_config(config).unwrap();
-
-    println!("{:?}", cursor_changer);
-
 
     let exit = Arc::new(Mutex::new(false));
 
     let thread_exit = Arc::clone(&exit);
     let child = thread::spawn(move || {
-        let cursor =
-            get_cursor("D:\\Users\\Marcus\\Source\\SmallProjects\\windows-cursor-changer\\big.cur");
-
-        let mut is_custom_cursor = false;
+        let mut cursor_changer = CursorChanger::from_config(config).unwrap();
+        println!("{:?}", cursor_changer);
 
         let mut should_exit = false;
 
         while !should_exit {
-            match get_cursor_pos() {
-                Ok(Some(name)) => {
-                    if name.ends_with("powershell.exe") {
-                        if !is_custom_cursor {
-                            println!("setting cursor");
-                            set_system_cursor(&cursor);
-                            is_custom_cursor = true;
-                        }
-                    } else {
-                        if is_custom_cursor {
-                            println!("restoring cursor");
-                            restore_original_cursors();
-                            is_custom_cursor = false;
-                        }
-                    }
-                }
-                Ok(None) => {}
-                Err(e) => println!("ERROR: {}", e),
-            }
+            cursor_changer.tick();
 
             // read the mutex to see if the thread should quit
             should_exit = *thread_exit.lock().unwrap();

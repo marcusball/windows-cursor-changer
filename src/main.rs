@@ -29,6 +29,11 @@ use std::thread;
 use winapi::shared::minwindef::{DWORD, UINT};
 use winapi::shared::windef::HCURSOR;
 
+
+/// Wrapper around the HCURSOR winapi type
+pub struct Cursor(HCURSOR);
+
+
 // ----------------------------------------------------
 
 // We have to encode text to wide format for Windows
@@ -38,7 +43,7 @@ fn win32_string(value: &str) -> Vec<u16> {
 }
 
 #[cfg(windows)]
-fn get_cursor() -> HCURSOR {
+fn get_cursor() -> Cursor {
     use winapi::um::winuser::{
         LoadCursorFromFileW, LoadImageW, IMAGE_CURSOR, LR_DEFAULTCOLOR, LR_LOADFROMFILE,
     };
@@ -48,7 +53,7 @@ fn get_cursor() -> HCURSOR {
     let wide: Vec<u16> = win32_string(&path);
 
     // unsafe { LoadCursorFromFileW(wide.as_ptr()) }
-    unsafe {
+    let c = unsafe {
         LoadImageW(
             null_mut(),
             wide.as_ptr(),
@@ -57,14 +62,16 @@ fn get_cursor() -> HCURSOR {
             0,
             LR_DEFAULTCOLOR | LR_LOADFROMFILE,
         ) as HCURSOR
-    }
+    };
+
+    Cursor(c)
 }
 
 /// Set all system cursors to a specific cursor.
 ///
 /// See: https://stackoverflow.com/a/55098397/451726
 #[cfg(windows)]
-fn set_system_cursor(cursor: HCURSOR) {
+fn set_system_cursor(cursor: &Cursor) {
     use winapi::um::winuser::SetSystemCursor;
 
     // See: https://docs.microsoft.com/en-us/windows/desktop/api/winuser/nf-winuser-setsystemcursor
@@ -87,7 +94,7 @@ fn set_system_cursor(cursor: HCURSOR) {
 
     for cursor_id in cursor_ids {
         let copied = copy_cursor(cursor);
-        unsafe { SetSystemCursor(copied, cursor_id) };
+        unsafe { SetSystemCursor(copied.0, cursor_id) };
     }
 }
 
@@ -106,11 +113,13 @@ fn restore_original_cursors() {
 /// Copy a cursor
 /// See: https://docs.microsoft.com/en-us/windows/desktop/api/winuser/nf-winuser-copycursor
 #[cfg(windows)]
-fn copy_cursor(cursor: HCURSOR) -> HCURSOR {
+fn copy_cursor(cursor: &Cursor) -> Cursor {
     use winapi::shared::windef::HICON;
     use winapi::um::winuser::CopyIcon;
 
-    unsafe { CopyIcon(cursor as HICON) }
+    let copied = unsafe { CopyIcon(cursor.0 as HICON) };
+
+    Cursor(copied)
 }
 
 #[cfg(windows)]
@@ -192,7 +201,7 @@ fn main() {
                     if name.ends_with("powershell.exe") {
                         if !is_custom_cursor {
                             println!("setting cursor");
-                            set_system_cursor(cursor);
+                            set_system_cursor(&cursor);
                             is_custom_cursor = true;
                         }
                     } else {

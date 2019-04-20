@@ -13,13 +13,13 @@ extern crate serde_derive;
 
 mod config;
 mod error;
+mod info;
 mod window;
 
 use error::Error;
 
 use std::ffi::OsStr;
 use std::iter::once;
-use std::mem;
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
 
@@ -30,10 +30,9 @@ use winapi::shared::minwindef::{DWORD, UINT};
 use winapi::shared::windef::HCURSOR;
 
 use std::collections::HashMap;
-use std::io::prelude::*;
 use std::path::Path;
 
-type Result<T> = std::result::Result<T, error::Error>;
+pub type Result<T> = std::result::Result<T, error::Error>;
 
 /// Wrapper around the HCURSOR winapi type
 #[derive(Debug)]
@@ -77,20 +76,20 @@ impl Cursor {
 #[derive(Debug)]
 pub struct Application {
     /// The ID of the Cursor to use when the mouse is over this Application.
-    cursor_id: CursorId, 
+    cursor_id: CursorId,
 
-    /// The path (or partial path) that will be used to identify this Application. 
-    /// Comparison will be done by checking if the full path of the executable 
+    /// The path (or partial path) that will be used to identify this Application.
+    /// Comparison will be done by checking if the full path of the executable
     /// under the cursor `ends_with` this `path`, so this may be a full absolute path,
-    /// or just the exe name or partial path. 
+    /// or just the exe name or partial path.
     path: String,
 }
 
 impl Application {
     pub fn new(cursor: CursorId, path: String) -> Self {
         Application {
-            cursor_id: cursor, 
-            path: path
+            cursor_id: cursor,
+            path: path,
         }
     }
 }
@@ -125,7 +124,7 @@ impl CursorChanger {
             cursor_ids: HashMap::new(),
             cursors: HashMap::new(),
             applications: Vec::new(),
-            active_cursor: None
+            active_cursor: None,
         }
     }
 
@@ -133,12 +132,12 @@ impl CursorChanger {
         self.active_cursor.is_some()
     }
 
-    /// Insert Cursors into the configuration `cursors` map.
+    /// Copy configuration details for Cursors into the configuration `cursors` map.
     fn add_cursors(&mut self, cursors: Vec<config::Cursor>) -> Result<()> {
         // Find the max existing ID, or default to zero if there are no existing IDs.
         let max_id = self.cursor_ids.values().max().unwrap_or(&0);
 
-        // This will keep track of the next ID to assign to each new cursor. 
+        // This will keep track of the next ID to assign to each new cursor.
         let mut next_id = max_id + 1;
 
         for config_cursor in cursors.into_iter() {
@@ -159,7 +158,7 @@ impl CursorChanger {
                 });
             }
 
-            let _existing = self.cursor_ids.insert(cursor.name.clone(), cursor.id); 
+            let _existing = self.cursor_ids.insert(cursor.name.clone(), cursor.id);
 
             // insert returns the value that was replaced if the key already exists
             assert_eq!(None, _existing);
@@ -167,7 +166,7 @@ impl CursorChanger {
             // Insert it into the map for easy lookup by `name`.
             self.cursors.insert(cursor.id, cursor);
 
-            // Increment the new Cursor ID. 
+            // Increment the new Cursor ID.
             next_id += 1;
         }
 
@@ -179,11 +178,11 @@ impl CursorChanger {
     /// by the Application's `cursor` name.
     fn add_applications(&mut self, applications: Vec<config::Application>) -> Result<()> {
         for config_application in applications.into_iter() {
-            // Try to find the ID of the cursor, given the cursor's name. 
+            // Try to find the ID of the cursor, given the cursor's name.
             let cursor_id = match self.cursor_ids.get(&config_application.cursor) {
-                // If we found it, use that ID. 
+                // If we found it, use that ID.
                 Some(id) => id,
-                // If the name did not return an ID, quit with an error. 
+                // If the name did not return an ID, quit with an error.
                 None => {
                     return Err(error::Error::MissingCursorNameError {
                         name: config_application.cursor.clone(),
@@ -203,7 +202,7 @@ impl CursorChanger {
         // Temp: just always use the first cursor
         let cursor = self.cursors.iter().nth(0).unwrap().1;
 
-        match get_cursor_pos() {
+        match get_process_under_cursor() {
             Ok(Some(name)) => {
                 if name.ends_with("powershell.exe") {
                     if !self.is_custom_cursor_active() {
@@ -312,59 +311,17 @@ fn copy_cursor(cursor: &CursorHandle) -> CursorHandle {
 }
 
 #[cfg(windows)]
-fn get_cursor_pos() -> Result<Option<String>> {
-    use winapi::shared::minwindef::MAX_PATH;
-    use winapi::shared::ntdef::HANDLE;
-    use winapi::shared::windef::POINT;
-    #[rustfmt::skip]
-    use winapi::um::winnt::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
-    #[rustfmt::skip]
-    use winapi::um::processthreadsapi::OpenProcess;
-    use winapi::um::handleapi::CloseHandle;
-    #[rustfmt::skip]
-    use winapi::um::psapi::GetModuleFileNameExW;
-    use winapi::um::winuser::{GetCursorPos, GetWindowThreadProcessId, WindowFromPoint};
+fn get_process_under_cursor() -> Result<Option<String>> {
+    use info::{CursorPosition, Process};
 
-    // We will read the executable path beneath the cursor into this vec.
-    let mut executable_name = Vec::with_capacity(MAX_PATH);
-
-    unsafe {
-        let mut point: POINT = mem::uninitialized();
-
-        if GetCursorPos(&mut point) == 0 {
-            return Ok(None);
-        }
-
-        // Get the window identifier that lies under this point.
-        let window = WindowFromPoint(point);
-
-        // Get the ID of the process from the window under the cursor.
-        let mut process_id: DWORD = mem::uninitialized();
-        GetWindowThreadProcessId(window, &mut process_id);
-
-        // In order to use `GetModuleFileNameExW` We need to get a handle to the process with these access rights.
-        // See: https://docs.microsoft.com/en-us/windows/desktop/api/psapi/nf-psapi-getmodulefilenameexw
-        let process_handle: HANDLE =
-            OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, process_id);
-
-        // Read the file name of the executable from the process, stored into the `executable_name` vec.
-        // Returns the length of the returned value.
-        let length = GetModuleFileNameExW(
-            process_handle,
-            null_mut(),
-            executable_name.as_mut_ptr(),
-            MAX_PATH as u32,
-        );
-
-        // Close the process handle.
-        CloseHandle(process_handle);
-
-        // Update the length of the vec.
-        executable_name.set_len(length as usize);
-    }
-
-
-    Ok(Some(String::from_utf16(&executable_name)?))
+    // Read the position of the cursor
+    CursorPosition::try_read()
+        // Get the process that is under the cursor at that position
+        .and_then(Process::from_position)
+        // Get the full path to that process's executable
+        .map(|p| p.executable_path())
+        // Convert the Option<Result<_>> type to Result<Option<_>>
+        .transpose()
 }
 
 #[cfg(windows)]

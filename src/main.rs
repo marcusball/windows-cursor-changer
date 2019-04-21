@@ -199,28 +199,68 @@ impl CursorChanger {
     }
 
     pub fn tick(&mut self) {
-        // Temp: just always use the first cursor
-        let cursor = self.cursors.iter().nth(0).unwrap().1;
-
+        // Get the full path to the executable of the window under the cursor (if any).
         match get_process_under_cursor() {
-            Ok(Some(name)) => {
-                if name.ends_with("powershell.exe") {
-                    if !self.is_custom_cursor_active() {
-                        println!("setting cursor");
-                        set_system_cursor(&cursor.handle);
-                        self.active_cursor = Some(cursor.id);
-                    }
-                } else {
-                    if self.is_custom_cursor_active() {
-                        println!("restoring cursor");
-                        restore_original_cursors();
-                        self.active_cursor = None;
-                    }
+            Ok(Some(exe_path)) => {
+                // Get the ID of the cursor to use for this application (or None)
+                let new_cursor_id = match self.application_matching(&exe_path) {
+                    Some(application) => Some(application.cursor_id),
+                    None => None,
+                };
+
+                // If there was a matching application, set the cursor for it.
+                // Note: this was broken into two `match` blocks to alleviate "cannot borrow `*self` as mutable more than once" errors.
+                match new_cursor_id {
+                    Some(cursor_id) => self.set_cursor(cursor_id),
+                    None => self.reset_to_default_cursor(),
                 }
             }
+            // No window under the cursor
             Ok(None) => {}
             Err(e) => println!("ERROR: {}", e),
         }
+    }
+
+    fn application_matching(&self, exe_path: &str) -> Option<&Application> {
+        self.applications
+            .iter()
+            .find(|app| exe_path.ends_with(&app.path))
+    }
+
+    fn set_cursor(&mut self, cursor_id: CursorId) {
+        // If the active cursor is the same as the application's desired cursor, then do nothing.
+        if self.active_cursor == Some(cursor_id) {
+            return;
+        }
+
+        // We checked the existence of the cursor when loading the Application list,
+        // so unless something went horribly wrong we should always receive the cursor.
+        let cursor = self
+            .cursors
+            .get(&cursor_id)
+            .expect("Failed to find requested cursor!");
+
+        println!("Activating cursor \"{}\" ({}).", cursor.name, cursor.id);
+
+        // Activate the requested cursor
+        set_system_cursor(&cursor.handle);
+
+        // Mark this cursor as the active one.
+        self.active_cursor = Some(cursor.id);
+    }
+
+    fn reset_to_default_cursor(&mut self) {
+        // If no custom cursor is active, then just return and do nothing.
+        if !self.is_custom_cursor_active() {
+            return;
+        }
+
+        println!("Resetting cursor to default.");
+
+        restore_original_cursors();
+
+        // Save the state of there being no custom cursor active.
+        self.active_cursor = None;
     }
 }
 

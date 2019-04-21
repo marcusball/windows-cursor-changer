@@ -17,8 +17,6 @@ mod info;
 mod system;
 mod window;
 
-use error::Error;
-
 use std::sync::{Arc, Mutex};
 use std::{thread, time};
 
@@ -277,10 +275,10 @@ impl CursorChanger {
 fn main() {
     let config = config::Config::from_file("cursor.toml").unwrap();
 
-
+    // This will be used to notify the cursor-checking thread to exit when the main window is closed.
     let exit = Arc::new(Mutex::new(false));
-
     let thread_exit = Arc::clone(&exit);
+
     let child = thread::spawn(move || {
         let mut cursor_changer = CursorChanger::from_config(config).unwrap();
 
@@ -319,7 +317,5 @@ fn main() {
     }
 
     // some work here
-    let res = child.join();
-
-    //restore_original_cursors();
+    let _res = child.join();
 }

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
@@ -41,11 +40,5 @@ impl Config {
         file.read_to_string(&mut contents)?;
 
         Ok(toml::from_str(&contents)?)
-    }
-}
-
-impl Cursor {
-    pub fn path(&self) -> &Path {
-        Path::new(&self.path)
     }
 }

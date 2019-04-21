@@ -3,8 +3,6 @@
 
 extern crate winapi;
 
-use crate::Error;
-
 use std::ffi::OsStr;
 use std::io::Error as IoError;
 use std::iter::once;

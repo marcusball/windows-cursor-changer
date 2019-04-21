@@ -14,19 +14,14 @@ extern crate serde_derive;
 mod config;
 mod error;
 mod info;
+mod system;
 mod window;
 
 use error::Error;
 
-use std::ffi::OsStr;
-use std::iter::once;
-use std::os::windows::ffi::OsStrExt;
-use std::ptr::null_mut;
-
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::{thread, time};
 
-use winapi::shared::minwindef::{DWORD, UINT};
 use winapi::shared::windef::HCURSOR;
 
 use std::collections::HashMap;
@@ -62,7 +57,7 @@ impl Cursor {
         Cursor {
             id: id,
             name: name,
-            handle: get_cursor(&path),
+            handle: system::get_cursor(&path),
             path: path,
         }
     }
@@ -200,7 +195,7 @@ impl CursorChanger {
 
     pub fn tick(&mut self) {
         // Get the full path to the executable of the window under the cursor (if any).
-        match get_process_under_cursor() {
+        match Self::get_process_under_cursor() {
             Ok(Some(exe_path)) => {
                 // Get the ID of the cursor to use for this application (or None)
                 let new_cursor_id = match self.application_matching(&exe_path) {
@@ -219,6 +214,19 @@ impl CursorChanger {
             Ok(None) => {}
             Err(e) => println!("ERROR: {}", e),
         }
+    }
+
+    fn get_process_under_cursor() -> Result<Option<String>> {
+        use info::{CursorPosition, Process};
+
+        // Read the position of the cursor
+        CursorPosition::try_read()
+            // Get the process that is under the cursor at that position
+            .and_then(Process::from_position)
+            // Get the full path to that process's executable
+            .map(|p| p.executable_path())
+            // Convert the Option<Result<_>> type to Result<Option<_>>
+            .transpose()
     }
 
     fn application_matching(&self, exe_path: &str) -> Option<&Application> {
@@ -243,7 +251,7 @@ impl CursorChanger {
         println!("Activating cursor \"{}\" ({}).", cursor.name, cursor.id);
 
         // Activate the requested cursor
-        set_system_cursor(&cursor.handle);
+        system::set_system_cursor(&cursor.handle);
 
         // Mark this cursor as the active one.
         self.active_cursor = Some(cursor.id);
@@ -257,112 +265,13 @@ impl CursorChanger {
 
         println!("Resetting cursor to default.");
 
-        restore_original_cursors();
+        system::restore_original_cursors();
 
         // Save the state of there being no custom cursor active.
         self.active_cursor = None;
     }
 }
 
-// ----------------------------------------------------
-
-// We have to encode text to wide format for Windows
-#[cfg(windows)]
-fn win32_string(value: &str) -> Vec<u16> {
-    OsStr::new(value).encode_wide().chain(once(0)).collect()
-}
-
-#[cfg(windows)]
-fn get_cursor(path: &str) -> CursorHandle {
-    use winapi::um::winuser::{
-        LoadCursorFromFileW, LoadImageW, IMAGE_CURSOR, LR_DEFAULTCOLOR, LR_LOADFROMFILE,
-    };
-
-    let wide: Vec<u16> = win32_string(path);
-
-    // unsafe { LoadCursorFromFileW(wide.as_ptr()) }
-    let c = unsafe {
-        LoadImageW(
-            null_mut(),
-            wide.as_ptr(),
-            IMAGE_CURSOR,
-            0,
-            0,
-            LR_DEFAULTCOLOR | LR_LOADFROMFILE,
-        ) as HCURSOR
-    };
-
-    CursorHandle(c)
-}
-
-/// Set all system cursors to a specific cursor.
-///
-/// See: https://stackoverflow.com/a/55098397/451726
-#[cfg(windows)]
-fn set_system_cursor(cursor: &CursorHandle) {
-    use winapi::um::winuser::SetSystemCursor;
-
-    // See: https://docs.microsoft.com/en-us/windows/desktop/api/winuser/nf-winuser-setsystemcursor
-    let cursor_ids: Vec<DWORD> = vec![
-        32650, // OCR_APPSTARTING
-        32512, // OCR_NORMAL
-        32515, // OCR_CROSS
-        32649, // OCR_HAND
-        32651, // OCR_HELP
-        32513, // OCR_IBEAM
-        32648, // OCR_NO
-        32646, // OCR_SIZEALL
-        32643, // OCR_SIZENESW
-        32645, // OCR_SIZENS
-        32642, // OCR_SIZENWSE
-        32644, // OCR_SIZEWE
-        32516, // OCR_UP
-        32514, // OCR_WAIT
-    ];
-
-    for cursor_id in cursor_ids {
-        let copied = copy_cursor(cursor);
-        unsafe { SetSystemCursor(copied.0, cursor_id) };
-    }
-}
-
-/// Restore original system cursors
-///
-/// See: https://stackoverflow.com/a/55098397/451726
-#[cfg(windows)]
-fn restore_original_cursors() {
-    use winapi::um::winuser::SystemParametersInfoW;
-
-    const SPI_SETCURSORS: UINT = 0x0057;
-
-    unsafe { SystemParametersInfoW(SPI_SETCURSORS, 0, null_mut(), 0) };
-}
-
-/// Copy a cursor
-/// See: https://docs.microsoft.com/en-us/windows/desktop/api/winuser/nf-winuser-copycursor
-#[cfg(windows)]
-fn copy_cursor(cursor: &CursorHandle) -> CursorHandle {
-    use winapi::shared::windef::HICON;
-    use winapi::um::winuser::CopyIcon;
-
-    let copied = unsafe { CopyIcon(cursor.0 as HICON) };
-
-    CursorHandle(copied)
-}
-
-#[cfg(windows)]
-fn get_process_under_cursor() -> Result<Option<String>> {
-    use info::{CursorPosition, Process};
-
-    // Read the position of the cursor
-    CursorPosition::try_read()
-        // Get the process that is under the cursor at that position
-        .and_then(Process::from_position)
-        // Get the full path to that process's executable
-        .map(|p| p.executable_path())
-        // Convert the Option<Result<_>> type to Result<Option<_>>
-        .transpose()
-}
 
 #[cfg(windows)]
 fn main() {
@@ -381,6 +290,11 @@ fn main() {
         while !should_exit {
             cursor_changer.tick();
 
+            // Not sleeping just results in ~30% CPU usage.
+            // Even 200 FPS would be 5ms, so this is still a generous poll rate.
+            let sleep_time = time::Duration::from_millis(1);
+            thread::sleep(sleep_time);
+
             // read the mutex to see if the thread should quit
             should_exit = *thread_exit.lock().unwrap();
         }
@@ -388,7 +302,7 @@ fn main() {
         println!("Exiting gracefully...");
         // some work here
 
-        restore_original_cursors();
+        system::restore_original_cursors();
     });
 
     // Create a window

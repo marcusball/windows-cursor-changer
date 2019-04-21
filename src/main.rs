@@ -283,25 +283,27 @@ fn main() {
     let thread_exit = Arc::clone(&exit);
     let child = thread::spawn(move || {
         let mut cursor_changer = CursorChanger::from_config(config).unwrap();
-        println!("{:?}", cursor_changer);
 
-        let mut should_exit = false;
-
-        while !should_exit {
+        loop {
             cursor_changer.tick();
 
             // Not sleeping just results in ~30% CPU usage.
             // Even 200 FPS would be 5ms, so this is still a generous poll rate.
-            let sleep_time = time::Duration::from_millis(1);
+            let sleep_time = time::Duration::from_millis(5);
             thread::sleep(sleep_time);
 
             // read the mutex to see if the thread should quit
-            should_exit = *thread_exit.lock().unwrap();
+            let should_exit = *thread_exit.lock().unwrap();
+
+            // Kill the loop when notified by the main thread.
+            if should_exit {
+                break;
+            }
         }
 
         println!("Exiting gracefully...");
-        // some work here
 
+        // Restore the cursors so you're not stuck with your wacky cursor forever.
         system::restore_original_cursors();
     });
 

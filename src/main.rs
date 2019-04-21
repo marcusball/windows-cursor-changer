@@ -1,5 +1,6 @@
 // Let's put this so that it won't open console
-// #![windows_subsystem = "windows"]
+// comment this out to see the print logs. 
+#![windows_subsystem = "windows"]
 
 extern crate serde;
 extern crate toml;

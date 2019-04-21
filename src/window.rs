@@ -73,8 +73,8 @@ fn create_window(name: &str, title: &str) -> Result<Window, IoError> {
             WS_OVERLAPPEDWINDOW | WS_VISIBLE, // dwStyle
             CW_USEDEFAULT, // Int x
             CW_USEDEFAULT, // Int y
-            CW_USEDEFAULT, // Int nWidth
-            CW_USEDEFAULT, // Int nHeight
+            200,           // Int nWidth
+            200,           // Int nHeight
             null_mut(),    // hWndParent
             null_mut(),    // hMenu
             hinstance,     // hInstance
@@ -118,7 +118,7 @@ fn handle_message(window: &mut Window) -> bool {
 
 #[cfg(windows)]
 pub fn create_window_and_block() {
-    let mut window = create_window("my_window", "Window Cursor Changer").unwrap();
+    let mut window = create_window("cursor_changer", "Window Cursor Changer").unwrap();
 
     loop {
         if !handle_message(&mut window) {
